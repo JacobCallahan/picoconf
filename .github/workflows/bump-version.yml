@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   bump-and-release:
@@ -27,9 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Use PAT to trigger release workflow on tag push
-          # If using GITHUB_TOKEN, the release workflow won't trigger automatically
-          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ github.token }}
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -92,7 +91,7 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           RELEASE_NAME="${{ inputs.release_name }}"
           if [ -z "$RELEASE_NAME" ]; then
@@ -103,3 +102,9 @@ jobs:
             --title "$RELEASE_NAME" \
             --generate-notes \
             --verify-tag
+
+      - name: Trigger release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml --ref "v${{ steps.new_version.outputs.version }}"
