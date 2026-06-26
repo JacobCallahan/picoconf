@@ -38,6 +38,19 @@ plain_dict = config.to_dict()
 # All nested PicoConf objects become regular dicts
 ```
 
+Key Normalization
+-----------------
+PicoConf is opinionated: **all config keys are normalized to lowercase** regardless of how they are defined. This applies to keys loaded from `.pconf` files, kwargs passed to the constructor, and keys introduced via environment variable overrides. It ensures consistent, cross-platform behavior (Windows treats environment variable names as case-insensitive).
+
+```python
+# Keys are always stored and accessed in lowercase
+config = PC(**{"LOG_LEVEL": "debug", "Database_Host": "localhost"})
+print(config.log_level)      # "debug"
+print(config.database_host)  # "localhost"
+```
+
+Always use lowercase when reading config values, even if the source uses uppercase or mixed case.
+
 Configuration File Format
 -------------------------
 PicoConf uses a simple configuration file format that is easy to read and write.
@@ -109,7 +122,7 @@ Environment Variables
 PicoConf supports environment variables either as overrides to existing values or as additions to the loaded config.
 Envars are evaluated on a per-file basis, so you can have different envars for different config files.
 The way we manage this is by having a special `_envar_prefix` key in the config file.
-**Note:** Environment variable names are matched case-insensitively and normalized to lowercase for cross-platform compatibility. Both the `_envar_prefix` and the config keys extracted from environment variables are converted to lowercase to ensure consistent behavior across all platforms (Windows treats env vars as case-insensitive).
+Because all keys are normalized to lowercase (see above), env var suffixes are matched case-insensitively by design — `MYAPP_LOG_LEVEL` and `myapp_log_level` both map to the `log_level` config key.
 ```yaml
 _envar_prefix: myapp
 key: value
