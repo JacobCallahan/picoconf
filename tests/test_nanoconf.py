@@ -102,6 +102,21 @@ def test_imported_config_dotted_access():
     assert pconf["animals"].dog.name == "Dog"
 
 
+@pytest.mark.parametrize(
+    "set_envars",
+    [
+        ("RIZZA_LOG_LEVEL", "info"),   # conventional all-uppercase env var name
+        ("rizza_log_level", "info"),   # all-lowercase variant
+    ],
+    indirect=True,
+)
+def test_uppercase_key_envar_override(set_envars):
+    """Env var override must update the existing uppercase key, not create a new lowercase one."""
+    pconf = PC(**{"_envar_prefix": "rizza", "LOG_LEVEL": "debug"})
+    assert pconf.LOG_LEVEL == "info", "uppercase key should be overridden by env var"
+    assert not hasattr(pconf, "log_level"), "a spurious lowercase key must not be created"
+
+
 def test_to_dict_conversion():
     """Test that to_dict() recursively converts PicoConf to plain dicts."""
     pconf = PC("tests/data/nested.pconf")

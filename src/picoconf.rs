@@ -2,6 +2,7 @@ use pyo3::exceptions::{PyAttributeError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::*;
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -11,6 +12,8 @@ pub struct PicoConf {
     cfg_path: Option<PathBuf>,
     name: Option<String>,
     envar_prefix: Option<String>,
+    /// Maps lowercase key → original-cased key for O(1) case-insensitive lookup in pull_envars.
+    key_case_map: HashMap<String, String>,
 }
 
 #[pymethods]
@@ -30,6 +33,7 @@ impl PicoConf {
             cfg_path: None,
             name: None,
             envar_prefix: None,
+            key_case_map: HashMap::new(),
         };
 
         // Process kwargs first
@@ -43,6 +47,9 @@ impl PicoConf {
         if let Some(cfg_path_val) = cfg_path {
             picoconf.process_cfg_path(py, cfg_path_val)?;
         }
+
+        // Apply env var overrides for all construction paths (file, kwargs, or both)
+        picoconf.pull_envars(py)?;
 
         Ok(picoconf)
     }
@@ -78,12 +85,13 @@ impl PicoConf {
         key: &Bound<'_, PyAny>,
         value: Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        // Check if we need to update envar_prefix before processing
-        let is_envar_prefix = if let Ok(key_str) = key.extract::<String>() {
-            key_str == "_envar_prefix"
-        } else {
-            false
-        };
+        let key_str_opt = key.extract::<String>().ok();
+        let is_envar_prefix = key_str_opt.as_deref() == Some("_envar_prefix");
+
+        // Keep key_case_map in sync so pull_envars can resolve original casing
+        if let Some(ref k) = key_str_opt {
+            self.key_case_map.insert(k.to_lowercase(), k.clone());
+        }
 
         let processed_value = self.wrap_dicts_in_value(py, value)?;
 
@@ -100,6 +108,9 @@ impl PicoConf {
     }
 
     fn __delitem__(&mut self, py: Python, key: &Bound<'_, PyAny>) -> PyResult<()> {
+        if let Ok(k) = key.extract::<String>() {
+            self.key_case_map.remove(&k.to_lowercase());
+        }
         self.inner.bind(py).del_item(key)
     }
 
@@ -217,6 +228,7 @@ impl PicoConf {
     fn clear(&mut self, py: Python) -> PyResult<()> {
         self.inner.bind(py).clear();
         self.envar_prefix = None;
+        self.key_case_map.clear();
         Ok(())
     }
 
@@ -227,6 +239,7 @@ impl PicoConf {
             cfg_path: self.cfg_path.clone(),
             name: self.name.clone(),
             envar_prefix: self.envar_prefix.clone(),
+            key_case_map: self.key_case_map.clone(),
         })
     }
 
@@ -462,7 +475,6 @@ impl PicoConf {
                 .map(|s| s.to_string());
 
             self.load_config(py)?;
-            self.pull_envars(py)?;
         }
 
         Ok(())
@@ -549,34 +561,40 @@ impl PicoConf {
                 let full_prefix = format!("{}_", prefix);
                 let full_prefix_lower = full_prefix.to_lowercase();
 
-                for (key, val) in std::env::vars() {
-                    let key_lower = key.to_lowercase();
+                // Collect matching env vars first to avoid holding the env iterator
+                // while mutating self via __setitem__.
+                let updates: Vec<(String, String)> = std::env::vars()
+                    .filter_map(|(key, val)| {
+                        let key_lower = key.to_lowercase();
+                        if key_lower.starts_with(&full_prefix_lower) {
+                            Some((key_lower[full_prefix_lower.len()..].to_string(), val))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-                    // Case-insensitive comparison for cross-platform compatibility
-                    if key_lower.starts_with(&full_prefix_lower) {
-                        // Extract config key from lowercase version to ensure consistent casing
-                        let config_key = &key_lower[full_prefix_lower.len()..];
+                for (config_key_lower, val) in updates {
+                    // Resolve to original casing via the pure-Rust side table.
+                    // Falls back to the lowercase suffix if no existing key matches.
+                    let actual_key = self
+                        .key_case_map
+                        .get(&config_key_lower)
+                        .cloned()
+                        .unwrap_or_else(|| config_key_lower.clone());
 
-                        // Try to parse as JSON
-                        let py_value = match serde_json::from_str::<JsonValue>(&val) {
-                            Ok(json_val) => {
-                                // Convert JSON to Python object
-                                let py_obj = json_to_pyobject(py, &json_val)?;
+                    let py_value = match serde_json::from_str::<JsonValue>(&val) {
+                        Ok(json_val) => {
+                            let py_obj = json_to_pyobject(py, &json_val)?;
+                            let py_obj_bound = py_obj.bind(py);
+                            let picoconf_val = PicoConf::new(py, Some(py_obj_bound), None)?;
+                            Py::new(py, picoconf_val)?.into_any().into_bound(py)
+                        }
+                        Err(_) => PyString::new(py, &val).into_any(),
+                    };
 
-                                // Wrap in PicoConf (matches Python behavior)
-                                let py_obj_bound = py_obj.bind(py);
-                                let picoconf_val = PicoConf::new(py, Some(py_obj_bound), None)?;
-                                Py::new(py, picoconf_val)?.into_any().into_bound(py)
-                            }
-                            Err(_) => {
-                                // Use raw string value
-                                PyString::new(py, &val).into_any()
-                            }
-                        };
-
-                        let key_py = PyString::new(py, config_key);
-                        self.__setitem__(py, key_py.as_any(), py_value)?;
-                    }
+                    let key_py = PyString::new(py, &actual_key);
+                    self.__setitem__(py, key_py.as_any(), py_value)?;
                 }
             }
         }

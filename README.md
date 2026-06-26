@@ -132,6 +132,43 @@ config = PicoConf("/path/to/config.pconf")
 print(config.abc.b)
 ```
 
+### Overriding Individual Keys in Nested Sections
+
+Because env vars are matched flat against each file's own prefix, there is no built-in delimiter (like `__`) for drilling into a nested section. The idiomatic way to get per-key env var control over a nested section is to split that section into its own file with its own `_envar_prefix`, then import it from the parent.
+
+```
+<project root>
+main.pconf
+connection.pconf
+```
+
+**`connection.pconf`** — owns the prefix for its own keys:
+```yaml
+_envar_prefix: myapp_connection
+host: db.example.com
+port: 5432
+```
+
+**`main.pconf`** — imports the file so the nesting is preserved:
+```yaml
+_envar_prefix: myapp
+_import:
+    - connection.pconf
+key: value
+```
+
+```python
+config = PicoConf("/path/to/main.pconf")
+print(config.connection.host)  # db.example.com
+```
+
+Now individual keys in the nested section can be overridden without touching the rest:
+```bash
+export myapp_connection_host=prod-db.example.com
+```
+
+The access path (`config.connection.host`) stays the same — picoconf nests the imported file under its filename, so the structure is identical to having the values inline in `main.pconf`.
+
 Converting to Plain Dictionaries
 ---------------------------------
 PicoConf objects can be recursively converted to plain Python dictionaries using the `to_dict()` method. This is useful for serialization, passing to libraries that expect plain dicts, or API responses.
