@@ -102,9 +102,3 @@ jobs:
             --title "$RELEASE_NAME" \
             --generate-notes \
             --verify-tag
-
-      - name: Trigger release workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh workflow run release.yml --ref "v${{ steps.new_version.outputs.version }}"
