@@ -57,6 +57,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
@@ -64,9 +69,10 @@ jobs:
           args: --release --out dist
 
       - name: Install and test
+        env:
+          UV_SYSTEM_PYTHON: 1
         run: |
-          pip install picoconf --find-links dist --force-reinstall
-          pip install pytest
+          uv pip install .[dev]
           pytest tests/ -v
 
       - name: Upload wheels
@@ -95,6 +101,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
@@ -102,9 +113,10 @@ jobs:
           args: --release --out dist
 
       - name: Install and test
+        env:
+          UV_SYSTEM_PYTHON: 1
         run: |
-          pip install picoconf --find-links dist --force-reinstall
-          pip install pytest
+          uv pip install .[dev]
           pytest tests/ -v
 
       - name: Upload wheels
@@ -132,6 +144,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
@@ -139,9 +156,10 @@ jobs:
           args: --release --out dist
 
       - name: Install and test
+        env:
+          UV_SYSTEM_PYTHON: 1
         run: |
-          pip install picoconf --find-links dist --force-reinstall
-          pip install pytest
+          uv pip install .[dev]
           pytest tests/ -v
 
       - name: Upload wheels

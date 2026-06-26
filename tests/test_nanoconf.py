@@ -110,11 +110,10 @@ def test_imported_config_dotted_access():
     ],
     indirect=True,
 )
-def test_uppercase_key_envar_override(set_envars):
-    """Env var override must update the existing uppercase key, not create a new lowercase one."""
+def test_envar_override_with_normalized_keys(set_envars):
+    """All keys are normalized to lowercase; env var overrides must update the normalized key."""
     pconf = PC(**{"_envar_prefix": "rizza", "LOG_LEVEL": "debug"})
-    assert pconf.LOG_LEVEL == "info", "uppercase key should be overridden by env var"
-    assert not hasattr(pconf, "log_level"), "a spurious lowercase key must not be created"
+    assert pconf.log_level == "info", "normalized key should be overridden by env var"
 
 
 def test_to_dict_conversion():

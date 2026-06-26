@@ -2,7 +2,6 @@ use pyo3::exceptions::{PyAttributeError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::*;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -12,8 +11,6 @@ pub struct PicoConf {
     cfg_path: Option<PathBuf>,
     name: Option<String>,
     envar_prefix: Option<String>,
-    /// Maps lowercase key → original-cased key for O(1) case-insensitive lookup in pull_envars.
-    key_case_map: HashMap<String, String>,
 }
 
 #[pymethods]
@@ -33,7 +30,6 @@ impl PicoConf {
             cfg_path: None,
             name: None,
             envar_prefix: None,
-            key_case_map: HashMap::new(),
         };
 
         // Process kwargs first
@@ -88,19 +84,19 @@ impl PicoConf {
         let key_str_opt = key.extract::<String>().ok();
         let is_envar_prefix = key_str_opt.as_deref() == Some("_envar_prefix");
 
-        // Keep key_case_map in sync so pull_envars can resolve original casing
-        if let Some(ref k) = key_str_opt {
-            self.key_case_map.insert(k.to_lowercase(), k.clone());
-        }
-
         let processed_value = self.wrap_dicts_in_value(py, value)?;
 
-        // Store in inner dict
-        self.inner.bind(py).set_item(key, &processed_value)?;
+        // All string keys are normalized to lowercase for cross-platform consistency.
+        let normalized_key: Bound<'_, PyAny> = if let Some(ref k) = key_str_opt {
+            PyString::new(py, &k.to_lowercase()).into_any()
+        } else {
+            key.clone()
+        };
+        self.inner
+            .bind(py)
+            .set_item(&normalized_key, &processed_value)?;
 
-        // Special handling for _envar_prefix - dual storage
         if is_envar_prefix {
-            // Normalize to lowercase for consistent cross-platform matching
             self.envar_prefix = Some(processed_value.extract::<String>()?.to_lowercase());
         }
 
@@ -108,9 +104,6 @@ impl PicoConf {
     }
 
     fn __delitem__(&mut self, py: Python, key: &Bound<'_, PyAny>) -> PyResult<()> {
-        if let Ok(k) = key.extract::<String>() {
-            self.key_case_map.remove(&k.to_lowercase());
-        }
         self.inner.bind(py).del_item(key)
     }
 
@@ -228,7 +221,6 @@ impl PicoConf {
     fn clear(&mut self, py: Python) -> PyResult<()> {
         self.inner.bind(py).clear();
         self.envar_prefix = None;
-        self.key_case_map.clear();
         Ok(())
     }
 
@@ -239,7 +231,6 @@ impl PicoConf {
             cfg_path: self.cfg_path.clone(),
             name: self.name.clone(),
             envar_prefix: self.envar_prefix.clone(),
-            key_case_map: self.key_case_map.clone(),
         })
     }
 
@@ -575,14 +566,6 @@ impl PicoConf {
                     .collect();
 
                 for (config_key_lower, val) in updates {
-                    // Resolve to original casing via the pure-Rust side table.
-                    // Falls back to the lowercase suffix if no existing key matches.
-                    let actual_key = self
-                        .key_case_map
-                        .get(&config_key_lower)
-                        .cloned()
-                        .unwrap_or_else(|| config_key_lower.clone());
-
                     let py_value = match serde_json::from_str::<JsonValue>(&val) {
                         Ok(json_val) => {
                             let py_obj = json_to_pyobject(py, &json_val)?;
@@ -593,7 +576,7 @@ impl PicoConf {
                         Err(_) => PyString::new(py, &val).into_any(),
                     };
 
-                    let key_py = PyString::new(py, &actual_key);
+                    let key_py = PyString::new(py, &config_key_lower);
                     self.__setitem__(py, key_py.as_any(), py_value)?;
                 }
             }
